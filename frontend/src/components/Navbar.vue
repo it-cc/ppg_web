@@ -13,7 +13,7 @@
 
       <!-- 中间：主菜单 -->
       <div class="nav-center hidden-mobile">
-        <a v-for="link in navLinks" :key="link.name" :href="link.href" class="nav-link">
+        <a v-for="link in navLinks" :key="link.name" href="#" @click.prevent="emit('navigate', link.name)" class="nav-link">
           {{ link.name }}
           <span class="hover-underline"></span>
         </a>
@@ -56,7 +56,7 @@
     <!-- 移动端下拉菜单 -->
     <div :class="['mobile-menu', { 'open': isMobileMenuOpen }]">
       <div class="mobile-menu-content">
-        <a v-for="link in navLinks" :key="link.name" :href="link.href" class="mobile-link">
+        <a v-for="link in navLinks" :key="link.name" href="#" @click.prevent="emit('navigate', link.name); isMobileMenuOpen = false" class="mobile-link">
           {{ link.name }}
         </a>
       </div>
@@ -67,6 +67,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 
+const emit = defineEmits(['navigate']);
+
 const isScrolled = ref(false);
 const isMobileMenuOpen = ref(false);
 
@@ -76,6 +78,7 @@ const navLinks = [
   { name: '深层指标', href: '#' },
   { name: '健康报告', href: '#' },
   { name: '数据管理', href: '#' },
+  { name: 'AI分析报告', href: '#' },
 ];
 
 const handleScroll = () => {

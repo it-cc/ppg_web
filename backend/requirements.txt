@@ -3,5 +3,5 @@ uvicorn
 pandas
 numpy
 scipy
-neurokit2
 python-multipart
+openai

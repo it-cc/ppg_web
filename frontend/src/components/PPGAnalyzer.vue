@@ -50,10 +50,11 @@
 
     <!-- 右侧主展示区 -->
     <main class="main-content">
-      <!-- 顶部实时数据追踪 -->
-      <header class="top-stats">
-        <div class="stat-card">
-          <div class="stat-label">当前心率 (HR)</div>
+      <div v-show="currentView !== 'AI分析报告'" class="main-charts-wrapper">
+        <!-- 顶部实时数据追踪 -->
+        <header class="top-stats">
+          <div class="stat-card">
+            <div class="stat-label">当前心率 (HR)</div>
           <div class="stat-value text-green">
             {{ results?.features?.HR || '--' }}
             <span class="unit">bpm</span>
@@ -111,14 +112,85 @@
           </div>
         </div>
       </div>
+      </div> <!-- Close main-charts-wrapper -->
+
+      <!-- AI 分析报告视图 -->
+      <div v-show="currentView === 'AI分析报告'" class="ai-report-wrapper">
+        <div class="ai-report-header">
+          <h2><span class="icon-pulse">✨</span> Qwen AI 智能体征分析</h2>
+          <button class="btn-analyze" @click="generateAIReport" :disabled="!results || aiLoading">
+            {{ aiLoading ? '正在思考中...' : '生成最新报告' }}
+          </button>
+        </div>
+        
+        <div class="ai-report-content">
+          <div v-if="!results" class="empty-state">
+            <span class="empty-icon">📂</span>
+            <p>请先在左侧上传PPG数据并完成基础分析</p>
+          </div>
+          <div v-else-if="aiLoading" class="loading-state">
+            <div class="spinner"></div>
+            <p>Qwen AI 正在多维解析心血管指标，请稍候...</p>
+          </div>
+          <div v-else-if="aiReport" class="report-text" v-html="formattedReport"></div>
+          <div v-else class="empty-state">
+            <span class="empty-icon">🤖</span>
+            <p>数据已就绪，点击上方按钮开始获取 Qwen AI 心血管专家分析报告</p>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, nextTick, onMounted, onUnmounted, computed, watch } from 'vue';
 import axios from 'axios';
 import * as echarts from 'echarts';
+
+const props = defineProps<{
+  currentView: string;
+}>();
+
+// AI 状态
+const aiLoading = ref(false);
+const aiReport = ref<string | null>(null);
+
+const formattedReport = computed(() => {
+  if (!aiReport.value) return '';
+  // 简单的 Markdown 转 HTML 处理
+  return aiReport.value
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n(.*?)(\n|$)/g, '<p>$1</p>')
+    .replace(/### (.*?)(<\/p>|$)/g, '<h3>$1</h3>')
+    .replace(/## (.*?)(<\/p>|$)/g, '<h2>$1</h2>')
+    .replace(/<p><\/p>/g, '') // 清理空段落
+    .replace(/<p>\s*<\/p>/g, '');
+});
+
+const generateAIReport = async () => {
+  if (!results.value || !results.value.features) return;
+  aiLoading.value = true;
+  error.value = null;
+  
+  try {
+    const response = await axios.post('http://localhost:8000/api/ai_analysis', results.value.features);
+    aiReport.value = response.data.report;
+  } catch (err: any) {
+    aiReport.value = `<div class="error-msg">请求 AI 分析时发生错误: ${err.message}</div>`;
+  } finally {
+    aiLoading.value = false;
+  }
+};
+
+watch(() => props.currentView, (newVal) => {
+  if (newVal !== 'AI分析报告') {
+    nextTick(() => {
+      handleResize();
+    });
+  }
+});
 
 // 状态管理
 const file = ref<File | null>(null);
@@ -182,7 +254,7 @@ onUnmounted(() => {
 const onFileChange = (e: Event) => {
   const target = e.target as HTMLInputElement;
   if (target.files && target.files.length > 0) {
-    file.value = target.files[0];
+    file.value = target.files[0] || null;
   }
 };
 
@@ -578,4 +650,105 @@ const renderCharts = () => {
   padding: 6px;
   border-radius: 4px;
 }
+
+
+/* AI Report Styles */
+.main-charts-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 15px;
+  flex: 1;
+}
+.ai-report-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #111827;
+  border: 1px solid #1F2937;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ai-report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  border-bottom: 1px solid #1F2937;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.ai-report-header h2 {
+  margin: 0;
+  color: #3b82f6; /* Qwen Brand colorish */
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-report-content {
+  flex: 1;
+  padding: 25px;
+  overflow-y: auto;
+  color: #e2e8f0;
+  line-height: 1.8;
+  font-size: 1.05rem;
+}
+
+.report-text h2, .report-text h3 {
+  color: #fff;
+  margin-top: 1.2em;
+  margin-bottom: 0.6em;
+}
+
+.report-text strong {
+  color: #60a5fa;
+  font-weight: 600;
+}
+
+.report-text p {
+  margin-bottom: 1em;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #64748b;
+  font-size: 1.2rem;
+  text-align: center;
+}
+.empty-state .empty-icon {
+  font-size: 3rem;
+  margin-bottom: 15px;
+  opacity: 0.6;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #3b82f6;
+  gap: 20px;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(59, 130, 246, 0.2);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 </style>

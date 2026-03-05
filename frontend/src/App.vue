@@ -1,13 +1,20 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import PPGAnalyzer from './components/PPGAnalyzer.vue';
 import Navbar from './components/Navbar.vue';
+
+const currentView = ref('实时监测');
+
+const handleNavigate = (viewName: string) => {
+  currentView.value = viewName;
+};
 </script>
 
 <template>
   <div class="app-layout">
-    <Navbar />
+    <Navbar @navigate="handleNavigate" />
     <div class="main-wrapper">
-      <PPGAnalyzer />
+      <PPGAnalyzer :currentView="currentView" />
     </div>
   </div>
 </template>
