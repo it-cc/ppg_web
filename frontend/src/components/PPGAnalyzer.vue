@@ -362,8 +362,8 @@ const renderCharts = () => {
 <style scoped>
 .dashboard {
   display: flex;
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
   overflow: hidden;
 }
 

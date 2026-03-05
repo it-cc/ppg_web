@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import PPGAnalyzer from './components/PPGAnalyzer.vue';
+import Navbar from './components/Navbar.vue';
 </script>
 
 <template>
-  <PPGAnalyzer />
+  <div class="app-layout">
+    <Navbar />
+    <div class="main-wrapper">
+      <PPGAnalyzer />
+    </div>
+  </div>
 </template>
 
 <style>
@@ -24,8 +30,20 @@ body, html {
   margin: 0;
   padding: 0;
   display: flex;
-  justify-content: center;
-  align-items: center;
+  flex-direction: column;
+}
+
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+}
+
+.main-wrapper {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 * {
