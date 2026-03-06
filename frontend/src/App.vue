@@ -3,7 +3,7 @@ import { ref } from 'vue';
 import PPGAnalyzer from './components/PPGAnalyzer.vue';
 import Navbar from './components/Navbar.vue';
 
-const currentView = ref('实时监测');
+const currentView = ref('数据分析');
 
 const handleNavigate = (viewName: string) => {
   currentView.value = viewName;

@@ -50,7 +50,7 @@
 
     <!-- 右侧主展示区 -->
     <main class="main-content">
-      <div v-show="currentView !== 'AI分析报告'" class="main-charts-wrapper">
+      <div v-show="currentView === '数据分析'" class="main-charts-wrapper">
         <!-- 顶部实时数据追踪 -->
         <header class="top-stats">
           <div class="stat-card">
@@ -114,6 +114,15 @@
       </div>
       </div> <!-- Close main-charts-wrapper -->
 
+      <!-- 深入分析视图 -->
+      <div v-show="currentView === '深入分析'" class="main-charts-wrapper" style="overflow-y: auto;">
+        <PPGMorphology v-if="results?.morphology" :morphologyData="results.morphology" />
+        <div v-else class="empty-state">
+          <span class="empty-icon">📈</span>
+          <p>请先在左侧上传PPG数据并等待系统收集完整的心动周期进行形态学分析</p>
+        </div>
+      </div>
+
       <!-- AI 分析报告视图 -->
       <div v-show="currentView === 'AI分析报告'" class="ai-report-wrapper">
         <div class="ai-report-header">
@@ -148,6 +157,7 @@
 import { ref, reactive, nextTick, onMounted, onUnmounted, computed, watch } from 'vue';
 import axios from 'axios';
 import * as echarts from 'echarts';
+import PPGMorphology from './PPGMorphology.vue';
 
 const props = defineProps<{
   currentView: string;
@@ -185,7 +195,7 @@ const generateAIReport = async () => {
 };
 
 watch(() => props.currentView, (newVal) => {
-  if (newVal !== 'AI分析报告') {
+  if (newVal === '数据分析') {
     nextTick(() => {
       handleResize();
     });
@@ -213,6 +223,7 @@ const chartPeakRef = ref<HTMLElement | null>(null);
 let timeChart: echarts.ECharts | null = null;
 let freqChart: echarts.ECharts | null = null;
 let peakChart: echarts.ECharts | null = null;
+
 let scrollTimer: any = null; // 用于波形滚动动画
 
 // 通用科技暗黑主题背景色配置
@@ -245,7 +256,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize);
-  if (scrollTimer) clearInterval(scrollTimer);
+  if (streamTimer) clearInterval(streamTimer);
+  if (analysisTimer) clearInterval(analysisTimer);
+  if (uiTimer) clearInterval(uiTimer);
   timeChart?.dispose();
   freqChart?.dispose();
   peakChart?.dispose();
@@ -258,176 +271,230 @@ const onFileChange = (e: Event) => {
   }
 };
 
+let streamTimer: any = null;
+let analysisTimer: any = null;
+let uiTimer: any = null;
+
+
+const streamData = reactive({
+  raw: [] as number[],
+  filtered: [] as number[],
+  peaks: [] as number[],
+  time: [] as string[]
+});
+
+const staticChartData = reactive({
+  time: [] as string[],
+  filtered: [] as number[],
+  peaks: [] as number[],
+  freqData: [] as number[]
+});
+
+const updateSubCharts = () => {
+  if (peakChart) {
+    const peakMarks = staticChartData.peaks.map((p: number) => ({
+      name: 'Peak',
+      coord: [staticChartData.time[p], staticChartData.filtered[p]],
+      itemStyle: { color: '#f43f5e' }
+    }));
+
+    peakChart.setOption({
+      ...commonChartOptions,
+      animation: true,
+      title: { text: `检测到波峰: ${staticChartData.peaks.length} 个`, textStyle: { fontSize: 12, color: '#94a3b8' }, top: 0, right: 0 },
+      xAxis: { ...commonChartOptions.xAxis, data: staticChartData.time },
+      yAxis: { ...commonChartOptions.yAxis, scale: true },
+      series: [{
+        name: 'Peaks',
+        type: 'line',
+        data: staticChartData.filtered,
+        itemStyle: { color: '#10b981' },
+        lineStyle: { width: 2 },
+        showSymbol: false,
+        markPoint: {
+          symbol: 'circle',
+          symbolSize: 8,
+          data: peakMarks
+        }
+      }]
+    });
+  }
+
+  if (freqChart) {
+    freqChart.setOption({
+      ...commonChartOptions,
+      animation: true,
+      color: ['#8b5cf6'],
+      grid: { top: 20, right: 10, bottom: 20, left: 40 },
+      xAxis: { type: 'category', data: Array.from({ length: 50 }, (_, i) => (i * 0.1).toFixed(1)) },
+      yAxis: { ...commonChartOptions.yAxis, scale: true },
+      series: [{
+        name: 'PSD',
+        type: 'bar',
+        data: staticChartData.freqData,
+        itemStyle: { borderRadius: [2, 2, 0, 0] }
+      }]
+    });
+  }
+};
+
+
 const uploadFile = async () => {
   if (!file.value) return;
   loading.value = true;
   error.value = null;
-  const formData = new FormData();
-  formData.append('file', file.value);
-  
-  // Optional: append params if needed
-  // formData.append('params', JSON.stringify(params));
 
   try {
-    const response = await axios.post('http://localhost:8000/api/analyze', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+    const text = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target?.result as string);
+      reader.onerror = e => reject(e);
+      reader.readAsText(file.value as File);
     });
-    
-    if (response.data.error) {
-      error.value = response.data.error;
+
+    let allData: number[] = [];
+    if (file.value.name.endsWith('.json')) {
+      const json = JSON.parse(text);
+      allData = Array.isArray(json) ? json : Object.values(json).flat() as number[]; 
     } else {
-      results.value = response.data;
-      await nextTick();
-      renderCharts();
+      allData = text.split('\n').map(l => parseFloat((l.split(',')[0] || '').trim())).filter(n => !isNaN(n));
     }
+
+    if (allData.length === 0) throw new Error("没有有效数据");
+
+    loading.value = false;
+    startStreaming(allData);
   } catch (err: any) {
-    error.value = err.message || '系统接入异常';
-  } finally {
+    error.value = err.message || '解析文件异常';
     loading.value = false;
   }
 };
 
-const renderCharts = () => {
-  if (!results.value) return;
+const startStreaming = (allData: number[]) => {
+  let currentIndex = 0;
+  streamData.raw = [];
+  streamData.filtered = [];
+  streamData.peaks = [];
+  streamData.time = [];
   
-  if (scrollTimer) {
-    clearInterval(scrollTimer);
-  }
+  results.value = {
+    features: { HR: '--', SpO2: '--', RR: '--', HRV_SDNN: '--' },
+    morphology: null
+  };
 
-  // 构建峰值标记数据
-  const peakMarks = results.value.peaks ? results.value.peaks.map((p: number) => ({
-    name: 'Peak',
-    coord: [p, results.value.filtered_signal[p]],
-    itemStyle: { color: '#f43f5e' }
-  })) : [];
+  const BUFFER_SIZE = 1000; // 20s at 50Hz = 1000
+  const TICK_MS = 20;
 
-  // 获取数据以便动态滑窗
-  const rawData = results.value.raw_signal;
-  const filteredData = results.value.filtered_signal;
-  const totalPoints = rawData.length;
-  const windowSize = 500; // 屏幕视野内显示的点数 (类似监护仪一次刷屏量)
-  
-  // 1. 渲染时域图
-  if (chartTimeRef.value) {
-    timeChart = echarts.init(chartTimeRef.value);
+  if (streamTimer) clearInterval(streamTimer);
+  if (analysisTimer) clearInterval(analysisTimer);
+  if (uiTimer) clearInterval(uiTimer);
+  if (scrollTimer) clearInterval(scrollTimer);
+
+  streamTimer = setInterval(() => {
+    if (currentIndex >= allData.length) {
+       currentIndex = 0; 
+    }
+    const val = allData[currentIndex];
+    if (val !== undefined) {
+      streamData.raw.push(val);
+      streamData.time.push((currentIndex * (1/50)).toFixed(2));
+    }
     
-    const option = {
-      ...commonChartOptions,
-      animation: false, // 关闭全局重绘动画，保证高频更新不卡顿
-      legend: { data: ['Raw PPG', 'Filtered PPG'], textStyle: { color: '#cbd5e1' }, top: 0 },
-      dataZoom: [
-        { type: 'inside', id: 'zoomInside', startValue: 0, endValue: windowSize },
-        { type: 'slider', id: 'zoomSlider', startValue: 0, endValue: windowSize, borderColor: '#334155', textStyle: { color: '#94a3b8' }, fillerColor: 'rgba(56, 189, 248, 0.2)' }
-      ],
-      xAxis: { ...commonChartOptions.xAxis, data: Array.from({ length: totalPoints }, (_, i) => i) },
-      yAxis: { ...commonChartOptions.yAxis, scale: true },
-      series: [
-        {
-          name: 'Raw PPG',
-          type: 'line',
-          data: rawData,
-          itemStyle: { color: 'rgba(148, 163, 184, 0.4)' },
-          lineStyle: { width: 1 },
-          showSymbol: false,
-        },
-        {
-          name: 'Filtered PPG',
-          type: 'line',
-          data: filteredData,
-          itemStyle: { color: '#10b981' }, 
-          lineStyle: { width: 2, shadowColor: 'rgba(16, 185, 129, 0.4)', shadowBlur: 8 },
-          showSymbol: false,
-          markPoint: { // 在滤波信号上标记波峰
-            data: peakMarks,
-            symbol: 'circle',
-            symbolSize: 6,
-            itemStyle: { color: '#f43f5e', shadowColor: '#f43f5e', shadowBlur: 10 }
-          }
-        }
-      ]
-    };
-    
-    timeChart.setOption(option);
+    if (streamData.raw.length > BUFFER_SIZE) {
+      streamData.raw.shift();
+      streamData.time.shift();
+    }
+    currentIndex++;
+  }, TICK_MS);
 
-    // 启动心电监护仪般的向左滚动动画效果
-    let currentStart = 0;
-    scrollTimer = setInterval(() => {
-      if (!timeChart) return;
-      currentStart += 3; // 滚动步长(速度)，可根据采样率调整
-      
-      if (currentStart + windowSize >= totalPoints) {
-        currentStart = 0; // 回到起点循环播放
-      }
-      
-      timeChart.setOption({
-        dataZoom: [
-          { id: 'zoomInside', startValue: currentStart, endValue: currentStart + windowSize },
-          { id: 'zoomSlider', startValue: currentStart, endValue: currentStart + windowSize }
-        ]
+  // Initialize charts empty
+  nextTick(() => {
+    initCharts();
+  });
+
+  uiTimer = setInterval(() => {
+    updateCharts();
+  }, 250); // UI updates 4 times a sec to reduce CPU load
+
+  analysisTimer = setInterval(async () => {
+    if (streamData.raw.length < 100) return;
+    const currentRaw = [...streamData.raw];
+    const currentTime = [...streamData.time];
+    try {
+      const res = await axios.post('http://localhost:8000/api/analyze_buffer', {
+         signal: currentRaw,
+         sample_rate: 50
       });
-    }, 30); // 约 33FPS 刷新
-  }
+      results.value.features = res.data.features;
+      results.value.morphology = res.data.morphology;
+      
+      streamData.filtered = res.data.filtered_signal;
+      streamData.peaks = res.data.peaks;
+      
+      // Update the static charts for slower refresh rate and no jumping
+      staticChartData.filtered = res.data.filtered_signal;
+      staticChartData.peaks = res.data.peaks;
+      
+      // align time axis to the actual filtered data length properly 
+      const startIdx = currentTime.length - res.data.filtered_signal.length;
+      staticChartData.time = currentTime.slice(startIdx > 0 ? startIdx : 0);
+      
+      // Generate mock freq data once per second
+      staticChartData.freqData = Array.from({length: 50}, () => Math.random() * 10 * Math.exp(-Math.random() * 2));
+      updateSubCharts();
+    } catch(e) {}
+  }, 1000);
+};
 
-  // 2. 模拟渲染频域 PSD (此部分基于后端将来传回的 PSD 数组)
-  if (chartFreqRef.value) {
+const initCharts = () => {
+  if (chartTimeRef.value && !timeChart) {
+    timeChart = echarts.init(chartTimeRef.value);
+  }
+  if (chartFreqRef.value && !freqChart) {
     freqChart = echarts.init(chartFreqRef.value);
-    const mockFreqData = Array.from({length: 50}, () => Math.random() * 10 * Math.exp(-Math.random() * 2)); // Mock Power
-    freqChart.setOption({
-      ...commonChartOptions,
-      color: ['#8b5cf6'],
-      grid: { top: 20, right: 10, bottom: 20, left: 40 },
-      xAxis: { type: 'category', data: Array.from({ length: 50 }, (_, i) => (i * 0.1).toFixed(1)) }, // Mock Freq 0-5Hz
-      series: [
-        {
-          name: 'PSD',
-          type: 'bar',
-          data: mockFreqData,
-          itemStyle: {
-            borderRadius: [4, 4, 0, 0],
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: '#a855f7' },
-              { offset: 1, color: 'rgba(168, 85, 247, 0.1)' }
-            ])
-          }
-        }
-      ]
-    });
+  }
+  if (chartPeakRef.value && !peakChart) {
+    peakChart = echarts.init(chartPeakRef.value);
+  }
+};
+
+const updateCharts = () => {
+  if (!timeChart) return;
+  
+  // padding for filtered to match raw buffer
+  let paddingLength = streamData.raw.length - streamData.filtered.length;
+  let paddedFiltered = streamData.filtered.slice();
+  if (paddingLength > 0) {
+    paddedFiltered = [...Array(paddingLength).fill(null), ...streamData.filtered];
+  } else if (paddingLength < 0) {
+    paddedFiltered = streamData.filtered.slice(-paddingLength);
   }
 
-  // 3. 模拟渲染特征检测图 (如寻找 Systolic Peaks)
-  if (chartPeakRef.value) {
-    peakChart = echarts.init(chartPeakRef.value);
-    const limitedFiltered = results.value.filtered_signal.slice(0, 300); // 展示前300点
-    peakChart.setOption({
-      ...commonChartOptions,
-      grid: { top: 20, right: 10, bottom: 20, left: 40 },
-      xAxis: { type: 'category', show: false, data: Array.from({ length: 300 }, (_, i) => i) },
-      yAxis: { type: 'value', show: false, scale: true },
-      series: [
-        {
-          type: 'line',
-          data: limitedFiltered,
-          lineStyle: { color: '#38bdf8', width: 2 },
-          areaStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: 'rgba(56, 189, 248, 0.5)' },
-              { offset: 1, color: 'rgba(56, 189, 248, 0.0)' }
-            ])
-          },
-          showSymbol: false,
-          markPoint: {
-            data: [
-              { type: 'max', name: 'Max' }, // Mock Peaks
-              { coord: [100, limitedFiltered[100]] },
-              { coord: [200, limitedFiltered[200]] }
-            ],
-            itemStyle: { color: '#f43f5e', shadowColor: '#f43f5e', shadowBlur: 10 },
-            symbolSize: 10
-          }
-        }
-      ]
-    });
-  }
+  timeChart.setOption({
+    ...commonChartOptions,
+    animation: false,
+    legend: { data: ['Raw PPG', 'Filtered PPG'], textStyle: { color: '#cbd5e1' }, top: 0 },
+    xAxis: { ...commonChartOptions.xAxis, data: streamData.time },
+    yAxis: { ...commonChartOptions.yAxis, scale: true },
+    series: [
+      {
+        name: 'Raw PPG',
+        type: 'line',
+        data: streamData.raw,
+        itemStyle: { color: 'rgba(148, 163, 184, 0.4)' },
+        lineStyle: { width: 1 },
+        showSymbol: false,
+      },
+      {
+        name: 'Filtered PPG',
+        type: 'line',
+        data: paddedFiltered,
+        itemStyle: { color: '#38bdf8' },
+        lineStyle: { width: 2 },
+        showSymbol: false,
+      }
+    ]
+  });
 };
 </script>
 

@@ -73,11 +73,8 @@ const isScrolled = ref(false);
 const isMobileMenuOpen = ref(false);
 
 const navLinks = [
-  { name: '实时监测', href: '#' },
-  { name: '波形分析', href: '#' },
-  { name: '深层指标', href: '#' },
-  { name: '健康报告', href: '#' },
-  { name: '数据管理', href: '#' },
+  { name: '数据分析', href: '#' },
+  { name: '深入分析', href: '#' },
   { name: 'AI分析报告', href: '#' },
 ];
 
