@@ -10,3 +10,9 @@ class FeaturesInput(BaseModel):
     SpO2: float
     RR: float
     HRV_SDNN: float
+
+
+class AIAnalysisRequest(BaseModel):
+    features: FeaturesInput
+    provider: str = "local"
+    api_key: str | None = None

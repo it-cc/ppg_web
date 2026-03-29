@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import io
 
-from models import BufferInput, FeaturesInput
+from models import BufferInput, AIAnalysisRequest
 from process_data import process_buffer, extract_morphology
 from ai_service import get_ai_stream
 
@@ -52,8 +52,8 @@ async def analyze_ppg(file: UploadFile = File(...)):
         return {"error": str(e)}
 
 @app.post("/api/ai_analysis")
-async def get_ai_analysis(features: FeaturesInput):
-    stream = get_ai_stream(features)
+async def get_ai_analysis(payload: AIAnalysisRequest):
+    stream = get_ai_stream(payload.features, provider=payload.provider, api_key=payload.api_key)
     return StreamingResponse(stream, media_type="text/plain")
 
 if __name__ == "__main__":
